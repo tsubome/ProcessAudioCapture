@@ -4,6 +4,7 @@ A Windows DLL for capturing audio from specific processes (applications).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Windows](https://img.shields.io/badge/platform-Windows%2010%202004+-blue.svg)](https://www.microsoft.com/windows)
+[![PyPI](https://img.shields.io/pypi/v/process-audio-capture.svg)](https://pypi.org/project/process-audio-capture/)
 
 ## Overview
 
@@ -36,13 +37,18 @@ Based on Microsoft's official [ApplicationLoopback](https://github.com/microsoft
 
 ## Installation
 
+### Python (Recommended)
+
+```bash
+pip install process-audio-capture
+```
+
 ### Using Prebuilt Binaries
 
-Download the latest release from the [Releases](https://github.com/YOUR_USERNAME/ProcessAudioCapture/releases) page.
+Download the latest release from the [Releases](https://github.com/tsubome/ProcessAudioCapture/releases) page.
 
 Extract and use:
 - `ProcessAudioCapture.dll` - The main DLL
-- `python/process_audio_capture.py` - Python wrapper
 
 ### Building from Source
 
