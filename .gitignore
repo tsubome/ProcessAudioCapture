@@ -1,0 +1,53 @@
+# Build directories
+build/
+out/
+/x64/
+Debug/
+Release/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.filters
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Object files
+*.obj
+*.o
+*.lib
+*.exp
+*.ilk
+*.pdb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+*.egg-info/
+dist/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test outputs
+*.wav
+test_output.wav
+
+# OS files
+.DS_Store
+Thumbs.db
