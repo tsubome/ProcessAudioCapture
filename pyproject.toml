@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "process-audio-capture"
+version = "1.0.0"
+description = "Windows DLL for capturing audio from specific processes"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "tsubome"}
+]
+keywords = ["audio", "capture", "windows", "wasapi", "process", "loopback"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/tsubome/ProcessAudioCapture"
+Repository = "https://github.com/tsubome/ProcessAudioCapture"
+Issues = "https://github.com/tsubome/ProcessAudioCapture/issues"
+
+[tool.setuptools]
+packages = ["process_audio_capture"]
+package-dir = {"" = "src_python"}
+
+[tool.setuptools.package-data]
+process_audio_capture = ["*.dll"]
