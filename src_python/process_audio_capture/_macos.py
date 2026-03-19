@@ -81,16 +81,30 @@ class ProcessAudioCapture:
         def handler(content, error):
             if content is not None:
                 apps = content.applications()
+                windows = content.windows()
+
+                # PID → ウィンドウ情報のマッピングを構築
+                pid_windows = {}
+                for w in windows:
+                    owner = w.owningApplication()
+                    if owner:
+                        wpid = owner.processID()
+                        if wpid not in pid_windows:
+                            pid_windows[wpid] = str(w.title() or "")
+
                 for app in apps:
                     pid = app.processID()
                     name = str(app.applicationName() or "")
-                    # ウィンドウタイトルは最初のウィンドウから取得
-                    title = ""
-                    windows = content.windows()
-                    for w in windows:
-                        if w.owningApplication() and w.owningApplication().processID() == pid:
-                            title = str(w.title() or "")
-                            break
+
+                    # フィルタ: ウィンドウを持つアプリのみ（バックグラウンドサービスを除外）
+                    if pid not in pid_windows:
+                        continue
+
+                    # フィルタ: 名前なしを除外
+                    if not name:
+                        continue
+
+                    title = pid_windows.get(pid, "")
                     result.append(AudioProcess(pid=pid, name=name, window_title=title))
             event.set()
 
@@ -192,7 +206,7 @@ class ProcessAudioCapture:
                 )
         else:
             # EXCLUDE モード: 対象アプリ以外をキャプチャ
-            content_filter = SCContentFilter.alloc().initWithDisplay_excludingApplications_(
+            content_filter = SCContentFilter.alloc().initWithDisplay_excludingWindows_(
                 display,
                 [target_app[0]]
             )
@@ -397,7 +411,7 @@ class SystemAudioCapture:
         display = all_content[0].displays()[0]
 
         # 全アプリを含むフィルタ（何も除外しない = 全部キャプチャ）
-        content_filter = SCContentFilter.alloc().initWithDisplay_excludingApplications_(
+        content_filter = SCContentFilter.alloc().initWithDisplay_excludingWindows_(
             display, []
         )
 
