@@ -70,10 +70,73 @@ class ProcessAudioCapture:
         return "1.0.0-macos (ScreenCaptureKit)"
 
     @staticmethod
+    def _get_audio_output_pids() -> set:
+        """Core Audio HAL で音声出力中のプロセスPIDを取得"""
+        try:
+            import CoreAudio
+
+            addr = CoreAudio.AudioObjectPropertyAddress(
+                mSelector=CoreAudio.kAudioHardwarePropertyProcessObjectList,
+                mScope=CoreAudio.kAudioObjectPropertyScopeGlobal,
+                mElement=0
+            )
+            err, size = CoreAudio.AudioObjectGetPropertyDataSize(
+                CoreAudio.kAudioObjectSystemObject, addr, 0, [], None
+            )
+            if err != 0 or size <= 0:
+                return set()
+
+            err2, _, raw_data = CoreAudio.AudioObjectGetPropertyData(
+                CoreAudio.kAudioObjectSystemObject, addr, 0, [], size, None
+            )
+            if err2 != 0 or not raw_data:
+                return set()
+
+            obj_ids = struct.unpack(f'<{len(raw_data)//4}I', raw_data)
+            obj_ids = [x for x in obj_ids if x != 0]
+
+            audio_pids = set()
+            for obj_id in obj_ids:
+                try:
+                    # IsRunningOutput チェック
+                    out_addr = CoreAudio.AudioObjectPropertyAddress(
+                        mSelector=CoreAudio.kAudioProcessPropertyIsRunningOutput,
+                        mScope=CoreAudio.kAudioObjectPropertyScopeGlobal, mElement=0)
+                    _, _, out_raw = CoreAudio.AudioObjectGetPropertyData(
+                        obj_id, out_addr, 0, [], 4, None)
+                    is_output = struct.unpack('<I', out_raw)[0]
+                    if not is_output:
+                        continue
+
+                    # PID 取得
+                    pid_addr = CoreAudio.AudioObjectPropertyAddress(
+                        mSelector=CoreAudio.kAudioProcessPropertyPID,
+                        mScope=CoreAudio.kAudioObjectPropertyScopeGlobal, mElement=0)
+                    _, _, pid_raw = CoreAudio.AudioObjectGetPropertyData(
+                        obj_id, pid_addr, 0, [], 4, None)
+                    pid = struct.unpack('<I', pid_raw)[0]
+                    if pid > 0:
+                        audio_pids.add(pid)
+                except Exception:
+                    continue
+            return audio_pids
+        except Exception:
+            return set()
+
+    @staticmethod
     def enumerate_audio_processes() -> List[AudioProcess]:
-        """音声を出力中のアプリケーション一覧を取得"""
+        """音声を出力中かつキャプチャ可能なアプリケーション一覧を取得
+
+        Core Audio HAL で「音声出力中」のPIDを取得し、
+        ScreenCaptureKit で「キャプチャ可能」なアプリと交差させる。
+        → DRM 保護アプリ（Apple Music等）は ScreenCaptureKit に現れないため除外される。
+        → 音声を出していないアプリは Core Audio HAL に現れないため除外される。
+        """
         if not _SCK_AVAILABLE:
             return []
+
+        # Step 1: Core Audio HAL で音声出力中の PID を取得
+        audio_pids = ProcessAudioCapture._get_audio_output_pids()
 
         result = []
         event = threading.Event()
@@ -83,7 +146,7 @@ class ProcessAudioCapture:
                 apps = content.applications()
                 windows = content.windows()
 
-                # PID → ウィンドウ情報のマッピングを構築
+                # PID → ウィンドウタイトルのマッピング
                 pid_windows = {}
                 for w in windows:
                     owner = w.owningApplication()
@@ -96,11 +159,10 @@ class ProcessAudioCapture:
                     pid = app.processID()
                     name = str(app.applicationName() or "")
 
-                    # フィルタ: ウィンドウを持つアプリのみ（バックグラウンドサービスを除外）
-                    if pid not in pid_windows:
+                    # フィルタ: Core Audio で音声出力中のプロセスのみ
+                    if pid not in audio_pids:
                         continue
 
-                    # フィルタ: 名前なしを除外
                     if not name:
                         continue
 
