@@ -65,6 +65,11 @@ class ProcessAudioCapture:
         return _SCK_AVAILABLE
 
     @staticmethod
+    def get_version() -> str:
+        """バージョン文字列を返す"""
+        return "1.0.0-macos (ScreenCaptureKit)"
+
+    @staticmethod
     def enumerate_audio_processes() -> List[AudioProcess]:
         """音声を出力中のアプリケーション一覧を取得"""
         if not _SCK_AVAILABLE:
@@ -266,10 +271,34 @@ class ProcessAudioCapture:
         """再開"""
         self._is_paused = False
 
-    def _on_audio_buffer(self, data: bytes):
-        """オーディオバッファ受信時のコールバック"""
+    def _on_audio_buffer(self, data: bytes, num_samples: int = 0):
+        """オーディオバッファ受信時のコールバック
+
+        ScreenCaptureKit は非インターリーブ（プレーナー）float32 で出力する:
+          [L0 L1 L2 ... Ln] [R0 R1 R2 ... Rn]
+        WAV はインターリーブ形式が必要:
+          [L0 R0 L1 R1 L2 R2 ... Ln Rn]
+        ここでプレーナー → インターリーブ変換を行う。
+        """
         if self._is_paused:
             return
+
+        # プレーナー → インターリーブ変換
+        if self._channels == 2 and num_samples > 0:
+            try:
+                floats = struct.unpack(f'<{len(data)//4}f', data)
+                half = num_samples
+                if len(floats) >= half * 2:
+                    left = floats[:half]
+                    right = floats[half:half*2]
+                    # インターリーブ: L0 R0 L1 R1 ...
+                    interleaved = []
+                    for l, r in zip(left, right):
+                        interleaved.append(l)
+                        interleaved.append(r)
+                    data = struct.pack(f'<{len(interleaved)}f', *interleaved)
+            except Exception:
+                pass
 
         self._audio_buffers.append(data)
 
@@ -291,9 +320,9 @@ class ProcessAudioCapture:
             all_data = b''.join(self._audio_buffers)
             # float32 → int16 変換
             float_samples = struct.unpack(f'<{len(all_data)//4}f', all_data)
-            int16_data = b''.join(
-                struct.pack('<h', max(-32768, min(32767, int(s * 32767))))
-                for s in float_samples
+            int16_data = struct.pack(
+                f'<{len(float_samples)}h',
+                *(max(-32768, min(32767, int(s * 32767))) for s in float_samples)
             )
 
             with wave.open(self._output_path, 'wb') as wf:
@@ -430,10 +459,27 @@ class SystemAudioCapture:
     def resume(self):
         self._is_paused = False
 
-    def _on_audio_buffer(self, data: bytes):
-        """ProcessAudioCapture と同じバッファ処理"""
+    def _on_audio_buffer(self, data: bytes, num_samples: int = 0):
+        """ProcessAudioCapture と同じバッファ処理（プレーナー→インターリーブ変換含む）"""
         if self._is_paused:
             return
+
+        # プレーナー → インターリーブ変換
+        if self._channels == 2 and num_samples > 0:
+            try:
+                floats = struct.unpack(f'<{len(data)//4}f', data)
+                half = num_samples
+                if len(floats) >= half * 2:
+                    left = floats[:half]
+                    right = floats[half:half*2]
+                    interleaved = []
+                    for l, r in zip(left, right):
+                        interleaved.append(l)
+                        interleaved.append(r)
+                    data = struct.pack(f'<{len(interleaved)}f', *interleaved)
+            except Exception:
+                pass
+
         self._audio_buffers.append(data)
         if self._level_callback and len(data) >= 4:
             try:
@@ -450,9 +496,9 @@ class SystemAudioCapture:
         try:
             all_data = b''.join(self._audio_buffers)
             float_samples = struct.unpack(f'<{len(all_data)//4}f', all_data)
-            int16_data = b''.join(
-                struct.pack('<h', max(-32768, min(32767, int(s * 32767))))
-                for s in float_samples
+            int16_data = struct.pack(
+                f'<{len(float_samples)}h',
+                *(max(-32768, min(32767, int(s * 32767))) for s in float_samples)
             )
             with wave.open(self._output_path, 'wb') as wf:
                 wf.setnchannels(self._channels)
@@ -479,6 +525,50 @@ if _SCK_AVAILABLE:
                 return
 
             try:
+                # CMSampleBuffer から実際のオーディオフォーマットを推定（初回のみ）
+                if not getattr(capture, '_format_detected', False):
+                    try:
+                        from CoreMedia import CMSampleBufferGetNumSamples
+                        num_samples = CMSampleBufferGetNumSamples(sample_buffer)
+                        block_buf = CMSampleBufferGetDataBuffer(sample_buffer)
+                        if block_buf is not None and num_samples > 0:
+                            data_len = CMBlockBufferGetDataLength(block_buf)
+                            bytes_per_sample = data_len // num_samples
+                            # float32 stereo = 8, float32 mono = 4
+                            if bytes_per_sample == 8:
+                                capture._channels = 2
+                            elif bytes_per_sample == 4:
+                                capture._channels = 1
+                    except Exception:
+                        pass
+                    # 2つ目のバッファでサンプルレートを推定
+                    if not getattr(capture, '_first_timestamp', None):
+                        try:
+                            from CoreMedia import CMSampleBufferGetPresentationTimeStamp
+                            ts = CMSampleBufferGetPresentationTimeStamp(sample_buffer)
+                            from CoreMedia import CMSampleBufferGetNumSamples
+                            ns = CMSampleBufferGetNumSamples(sample_buffer)
+                            capture._first_timestamp = (ts.value / ts.timescale if ts.timescale else 0, ns)
+                        except Exception:
+                            capture._format_detected = True
+                    else:
+                        try:
+                            from CoreMedia import CMSampleBufferGetPresentationTimeStamp, CMSampleBufferGetNumSamples
+                            ts = CMSampleBufferGetPresentationTimeStamp(sample_buffer)
+                            t = ts.value / ts.timescale if ts.timescale else 0
+                            prev_t, prev_ns = capture._first_timestamp
+                            dt = t - prev_t
+                            if dt > 0:
+                                estimated_rate = int(round(prev_ns / dt))
+                                # 一般的なサンプルレートに丸める
+                                for standard in [44100, 48000, 96000, 22050, 16000]:
+                                    if abs(estimated_rate - standard) < standard * 0.05:
+                                        capture._sample_rate = standard
+                                        break
+                        except Exception:
+                            pass
+                        capture._format_detected = True
+
                 # CMSampleBuffer からオーディオデータを取得
                 block_buffer = CMSampleBufferGetDataBuffer(sample_buffer)
                 if block_buffer is None:
@@ -488,10 +578,14 @@ if _SCK_AVAILABLE:
                 if length <= 0:
                     return
 
+                # サンプル数を取得（プレーナー→インターリーブ変換に必要）
+                from CoreMedia import CMSampleBufferGetNumSamples
+                num_samples = CMSampleBufferGetNumSamples(sample_buffer)
+
                 data = bytearray(length)
                 CMBlockBufferCopyDataBytes(block_buffer, 0, length, data)
 
-                capture._on_audio_buffer(bytes(data))
+                capture._on_audio_buffer(bytes(data), num_samples=num_samples)
             except Exception:
                 pass
 
